@@ -9,6 +9,7 @@ A full-stack web application built with **Python** and **Streamlit** that enable
 - [Features](#-features)
 - [Tech Stack](#-tech-stack)
 - [Project Structure](#-project-structure)
+- [Architecture & Modules](#-architecture--modules)
 - [How It Works](#-how-it-works)
   - [Authentication & Session Management](#1-authentication--session-management)
   - [Posting Items](#2-posting-items)
@@ -58,13 +59,250 @@ A full-stack web application built with **Python** and **Streamlit** that enable
 
 ```
 Lost-and-Found/
-├── app.py              # Main Streamlit application (UI, routing, CSS theming)
-├── utils.py            # Backend logic (MongoDB, auth, CRUD, image handling)
-├── verify_logic.py     # Test suite for all backend functions
-├── requirements.txt    # Python dependencies
-├── .env                # MongoDB connection string (not committed)
-├── .gitignore          # Ignores .env, .venv, __pycache__
-└── README.md           # This file
+├── app.py                 # Main Streamlit entry point - minimal & clean
+├── models.py              # Data models and constants
+├── views.py               # UI components and rendering
+├── controllers.py         # Business logic and handlers
+├── styles.py              # CSS theming and styling
+├── utils.py               # MongoDB operations and utilities
+├── verify_logic.py        # Test suite for backend functions
+├── requirements.txt       # Python dependencies
+├── .env                   # MongoDB connection string (not committed)
+├── .gitignore             # Ignores .env, .venv, __pycache__
+└── README.md              # This file
+```
+
+---
+
+## 🏗 Architecture & Modules
+
+This project follows a **Model-View-Controller (MVC) pattern** for clean separation of concerns:
+
+### **1. `app.py` — Main Application Entry Point**
+- **Responsibility:** Initialize Streamlit, orchestrate routing, coordinate modules
+- **Lines of Code:** ~57 (lean & maintainable)
+- **Key Functions:**
+  - `main()` — Initialize config, load theme, route to pages
+  
+**Example:**
+```python
+def main():
+    st.set_page_config(...)
+    cookie_manager = stx.CookieManager(key="lf_cookies")
+    controllers.initialize_session_state()
+    styles.apply_theme(st.session_state["dark_mode"])
+    views.render_navbar(cookie_manager)
+    
+    # Route to correct page based on session state
+    if st.session_state["user"]:
+        if st.session_state["menu"] == "Home":
+            views.render_home_page(public=False)
+        # ... other routes
+```
+
+---
+
+### **2. `models.py` — Data Models & Constants**
+- **Responsibility:** Define data structures and application constants
+- **Key Classes:**
+  - `Item` — Represents a lost/found item with validation and serialization
+  - `User` — Represents a user account
+  
+- **Key Constants:**
+  - `CATEGORIES` — List of item categories
+  - `ITEMS_PER_PAGE` — Pagination size (10)
+  - `DARK_MODE_COLORS` / `LIGHT_MODE_COLORS` — Theme color palettes
+
+**Example:**
+```python
+class Item:
+    def __init__(self, id, title, itype, category, ...):
+        self.id = id
+        self.title = title
+        # ... other fields
+    
+    def to_dict(self):
+        """Convert to MongoDB-compatible dictionary"""
+        return {...}
+```
+
+---
+
+### **3. `views.py` — UI Components & Rendering**
+- **Responsibility:** All Streamlit UI rendering functions
+- **No Business Logic** — Only calls controllers/utils
+- **Key Functions:**
+  - `render_navbar(cookie_manager)` — Top navigation + theme toggle
+  - `render_auth_form(cookie_manager)` — Login/signup forms
+  - `render_home_page(public=False)` — Item listings with filters + pagination
+  - `render_post_item_page()` — Post new item form
+  - `render_my_items_page()` — Manage user's items (edit status, delete)
+  - `render_image(image_obj, **kwargs)` — Display Base64-encoded images
+
+**Example:**
+```python
+def render_home_page(public=False):
+    st.header("Latest Listings")
+    
+    # Filters
+    search_term = st.text_input("Search ...")
+    filter_type = st.selectbox("Filter by Type", FILTER_TYPES)
+    # ... more filters
+    
+    # Get data via controller
+    items = utils.load_items()
+    filtered = controllers.filter_items(items, search_term, ...)
+    
+    # Display
+    for item in filtered:
+        render_item_card(item)
+```
+
+---
+
+### **4. `controllers.py` — Business Logic & Handlers**
+- **Responsibility:** Process user actions and orchestrate data flow
+- **No Streamlit Calls** — Only receives/returns data
+- **Key Functions:**
+  - Session Management:
+    - `initialize_session_state()` — Setup Streamlit session variables
+    - `restore_login_from_cookie(cookie_manager)` — Persist login
+    - `handle_logout(cookie_manager)` — Clear session
+  
+  - Authentication:
+    - `handle_login(username, password, cookie_manager)` — Validate and create session
+    - `handle_register(username, password, contact)` — New user registration
+  
+  - Item Operations:
+    - `filter_items(items, search_term, ...)` — Apply all filters
+    - `get_paginated_items(items, page)` — Handle pagination
+    - `handle_post_item(...)` — Validate and save new item
+    - `handle_update_item_status(item_id, new_status)` — Mark item resolved/active
+    - `handle_delete_item(item_id)` — Delete with cleanup
+  
+  - Navigation:
+    - `handle_nav_click(page)` — Route to menu page
+    - `handle_toggle_dark_mode()` — Switch theme
+
+**Example:**
+```python
+def filter_items(items, search_term="", filter_type="All", ...):
+    """Pure function - no Streamlit dependency"""
+    filtered = []
+    for item in items:
+        if filter_type != "All" and item['type'] != filter_type:
+            continue
+        # ... apply all filters
+        filtered.append(item)
+    return list(reversed(filtered))  # Newest first
+```
+
+---
+
+### **5. `styles.py` — CSS Theming**
+- **Responsibility:** Apply dynamic theme styling
+- **Key Functions:**
+  - `get_colors(dark_mode: bool)` — Return color palette for theme
+  - `apply_theme(dark_mode: bool)` — Render all CSS to Streamlit
+  
+- **Features:**
+  - Dark mode: Dim background, light text
+  - Light mode: Bright background, dark text
+  - Dynamic color application to all components
+  - Responsive design (mobile, tablet, desktop)
+
+**Example:**
+```python
+def apply_theme(dark_mode: bool) -> None:
+    colors = get_colors(dark_mode)
+    st.markdown(f"""
+    <style>
+        .stApp {{ background-color: {colors['bg_main']} !important; }}
+        [data-testid="stTextInput"] input {{
+            background-color: {colors['input_bg']} !important;
+            color: {colors['text_color']} !important;
+        }}
+        /* ... 500+ lines of comprehensive CSS ... */
+    </style>
+    """, unsafe_allow_html=True)
+```
+
+---
+
+### **6. `utils.py` — Database & Utility Functions**
+- **Responsibility:** MongoDB operations and helper functions
+- **Key Functions:**
+  - **User Management:**
+    - `register_user(username, password, contact)` — Database insert
+    - `authenticate_user(username, password)` — Verify credentials
+    - `create_session(username)` — Generate token
+    - `validate_session(token)` — Check expiry
+    - `delete_session(token)` — Logout cleanup
+    - `get_user_contact(username)` — Retrieve contact info
+  
+  - **Item Operations:**
+    - `load_items()` — Get all items from MongoDB
+    - `save_item(item_dict)` — Insert new item
+    - `update_item_status(item_id, status)` — Mark resolved/active
+    - `delete_item(item_id)` — Remove from database
+    - `generate_item_id()` — Create unique ID (UUID first 8 chars)
+  
+  - **Image Handling:**
+    - `save_uploaded_image(uploaded_file)` — Base64 encode and validate
+    - Validates file type (JPG/PNG) and size (max 1 MB)
+
+---
+
+### **7. `verify_logic.py` — Test Suite**
+- **Responsibility:** Automated testing of backend functions
+- **Test Database:** `lostfound_test` (separate from production)
+- **Coverage:**
+  - User registration, authentication, session management
+  - Item CRUD operations
+  - Image upload validation
+  - Input validation edge cases
+  - Data consistency checks
+
+---
+
+## 🔄 Data Flow Diagram
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                        Browser/User                          │
+└──────────────────┬──────────────────────────────────────────┘
+                   │ (Streamlit interaction)
+                   ↓
+┌─────────────────────────────────────────────────────────────┐
+│                      views.py (UI)                           │
+│  • render_home_page()                                        │
+│  • render_post_item_page()                                   │
+│  • render_auth_form()                                        │
+└──────────────────┬──────────────────────────────────────────┘
+                   │ (calls business logic)
+                   ↓
+┌─────────────────────────────────────────────────────────────┐
+│                 controllers.py (Logic)                       │
+│  • filter_items()                                            │
+│  • handle_post_item()                                        │
+│  • handle_login()                                            │
+└──────────────────┬──────────────────────────────────────────┘
+                   │ (calls database)
+                   ↓
+┌─────────────────────────────────────────────────────────────┐
+│                  utils.py (Database)                         │
+│  • load_items()           →────┐                             │
+│  • save_item()                 │                             │
+│  • authenticate_user()    →────┤                             │
+└──────────────────────────┬─────┼──────────────────────────────┘
+                           ↓     ↑
+                    ┌──────────────────────┐
+                    │  MongoDB Atlas       │
+                    │  (lostfound DB)      │
+                    │  • users collection  │
+                    │  • items collection  │
+                    │  • sessions coll.    │
+                    └──────────────────────┘
 ```
 
 ---
